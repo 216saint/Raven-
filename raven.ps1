@@ -1,4 +1,4 @@
-# raven.ps1 — Windows-native launcher for Raven.
+# raven.ps1 - Windows-native launcher for Raven.
 # Removes the WSL2 + apt-install-tor dance. Idempotent: re-runs are safe.
 #
 # Usage:
@@ -17,7 +17,7 @@ $ErrorActionPreference = "Stop"
 $RepoRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location $RepoRoot
 
-# Tor Expert Bundle — pin a known-good version. Update both the URL and hash together.
+# Tor Expert Bundle - pin a known-good version. Update both the URL and hash together.
 # Bundle download page: https://www.torproject.org/download/tor/
 $TorBundleUrl = "https://archive.torproject.org/tor-package-archive/torbrowser/13.5.6/tor-expert-bundle-windows-x86_64-13.5.6.tar.gz"
 $TorBundleSha256 = "PINNED_HASH_REPLACE_ME"   # see comment below
@@ -98,7 +98,7 @@ if (-not $NoTorBundle) {
                 exit 1
             }
         } else {
-            Write-Warn "Tor bundle SHA-256 not pinned in raven.ps1 — skipping integrity check."
+            Write-Warn "Tor bundle SHA-256 not pinned in raven.ps1 - skipping integrity check."
             Write-Warn "Pin a hash from torproject.org and update `$TorBundleSha256."
         }
 
@@ -123,18 +123,18 @@ function Test-TorRunning {
 New-Item -ItemType Directory -Force -Path $RavenStateDir | Out-Null
 
 if (Test-TorRunning) {
-    Write-Step "Tor already listening on 127.0.0.1:9050 — reusing it."
+    Write-Step "Tor already listening on 127.0.0.1:9050 - reusing it."
 } elseif (Test-Path $TorExe) {
     Write-Step "Starting Tor ..."
     $torProc = Start-Process -FilePath $TorExe -PassThru -WindowStyle Hidden
     $torProc.Id | Out-File -Encoding ascii $TorPidFile
-    # Best-effort wait for bootstrap (10s) — not strictly required, scrape will retry.
+    # Best-effort wait for bootstrap (10s) - not strictly required, scrape will retry.
     for ($i = 0; $i -lt 20; $i++) {
         Start-Sleep -Milliseconds 500
         if (Test-TorRunning) { break }
     }
     if (-not (Test-TorRunning)) {
-        Write-Warn "Tor did not open 9050 within 10s — scrape may fail until it bootstraps."
+        Write-Warn "Tor did not open 9050 within 10s - scrape may fail until it bootstraps."
     }
 } else {
     Write-Warn "No system Tor and -NoTorBundle was set. Scraping .onion will fail."
