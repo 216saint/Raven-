@@ -4,9 +4,10 @@ import json
 import streamlit as st
 from datetime import datetime
 from pathlib import Path
-from scrape import scrape_multiple
+from scrape import scrape_multiple, set_egress_proxy
 from search import get_search_results
 import config as _robin_cfg
+import vpn as _vpn
 from llm_utils import BufferedStreamingHandler, get_model_choices, get_model_display_names
 from llm import get_llm, refine_query, filter_results, generate_summary, PRESET_PROMPTS
 from config import (
@@ -103,7 +104,7 @@ def cached_scrape_multiple(filtered: list, threads: int):
 
 # Streamlit page configuration
 st.set_page_config(
-    page_title="Robin: AI-Powered Dark Web OSINT Tool",
+    page_title="Raven — Dark Web OSINT (Robin fork)",
     page_icon="🕵️‍♂️",
     initial_sidebar_state="expanded",
 )
@@ -127,10 +128,11 @@ st.markdown(
 
 
 # Sidebar
-st.sidebar.title("Robin")
-st.sidebar.text("AI-Powered Dark Web OSINT Tool")
-st.sidebar.markdown(
-    """Made by [Apurv Singh Gautam](https://www.linkedin.com/in/apurvsinghgautam/)"""
+st.sidebar.title("Raven")
+st.sidebar.text("AI-Powered Dark Web OSINT")
+st.sidebar.caption(
+    "Fork of [Robin](https://github.com/apurvsinghgautam/robin) by "
+    "[Apurv Singh Gautam](https://www.linkedin.com/in/apurvsinghgautam/)."
 )
 st.sidebar.subheader("Settings")
 def _env_is_set(value) -> bool:
@@ -151,9 +153,15 @@ _robin_cfg.CUSTOM_API_MODEL = st.session_state["custom_api_model"].strip() or No
 
 model_options = get_model_choices()
 model_display_names = get_model_display_names(model_options)
+_preferred_defaults = ("gpt-5-mini", "gpt-4.1", "claude-sonnet-4-5", "gemini-2.5-flash")
 default_model_index = (
     next(
-        (idx for idx, name in enumerate(model_options) if name.lower() == "gpt4o"),
+        (
+            idx
+            for pref in _preferred_defaults
+            for idx, name in enumerate(model_options)
+            if name.lower() == pref
+        ),
         0,
     )
     if model_options
@@ -198,6 +206,70 @@ with st.sidebar.expander("🔌 Custom API Provider"):
         placeholder="llama-3.3-70b-versatile",
         help="Model to use. Required if the provider doesn't expose /v1/models for auto-discovery.",
     )
+# --- Network egress: manual proxy (optional) ---
+if "egress_proxy_url" not in st.session_state:
+    st.session_state["egress_proxy_url"] = _robin_cfg.RAVEN_PROXY_URL or ""
+
+with st.sidebar.expander("🌐 Network egress (proxy)"):
+    st.text_input(
+        "HTTP/SOCKS proxy URL",
+        key="egress_proxy_url",
+        placeholder="socks5h://user:pass@host:1080",
+        help=(
+            "Optional. Applied to clearweb scraping only — .onion targets still use Tor. "
+            "Accepts http://, https://, socks5://, socks5h://. Stored only in this session."
+        ),
+    )
+
+# Apply the proxy setting every rerun so changes take effect immediately.
+set_egress_proxy(st.session_state["egress_proxy_url"].strip() or None)
+
+# --- VPN tunnel (optional, opt-in) ---
+with st.sidebar.expander("🛡️ VPN tunnel"):
+    _vpn_status = _vpn.status()
+    if _vpn_status.get("connected"):
+        badge = "🟢" if _vpn_status.get("alive") else "🟡"
+        st.markdown(
+            f"{badge} **{_vpn_status['kind']}** · `{_vpn_status['iface']}`  \n"
+            f"peer: `{_vpn_status['peer']}`"
+        )
+        if st.button("Disconnect tunnel", use_container_width=True, key="vpn_disconnect"):
+            _vpn.disconnect()
+            st.rerun()
+    else:
+        st.caption(
+            "Upload a WireGuard `.conf` (ProtonVPN) or OpenVPN `.ovpn` (IPVanish). "
+            "Tunnel is brought up only when you click connect, and torn down on app exit."
+        )
+        vpn_file = st.file_uploader(
+            "Tunnel config",
+            type=["conf", "ovpn"],
+            key="vpn_config_upload",
+            help="Forbidden directives (PostUp, script-security, etc.) are rejected before launch.",
+        )
+        col_a, col_b = st.columns(2)
+        if col_a.button("Connect WireGuard", use_container_width=True, disabled=vpn_file is None, key="vpn_wg_btn"):
+            try:
+                text = vpn_file.getvalue().decode("utf-8", errors="replace")
+                _vpn.wg_up(text)
+                st.success("WireGuard tunnel up.")
+                st.rerun()
+            except Exception as e:
+                st.error(f"WireGuard error: {e}")
+        if col_b.button("Connect OpenVPN", use_container_width=True, disabled=vpn_file is None, key="vpn_ovpn_btn"):
+            try:
+                text = vpn_file.getvalue().decode("utf-8", errors="replace")
+                _vpn.ovpn_up(text)
+                st.success("OpenVPN tunnel up.")
+                st.rerun()
+            except Exception as e:
+                st.error(f"OpenVPN error: {e}")
+        st.checkbox(
+            "Abort pipeline if VPN drops",
+            key="vpn_killswitch",
+            help="During a scrape job, cancel pending work if the tunnel interface dies. Does not touch system firewall.",
+        )
+
 threads = st.sidebar.slider("Scraping Threads", 1, 16, 4, key="thread_slider")
 max_results = st.sidebar.slider(
     "Max Results to Filter", 10, 100, 50, key="max_results_slider",
@@ -332,6 +404,15 @@ if saved_investigations:
 else:
     st.sidebar.caption("No saved investigations yet.")
 
+
+# --- Network status banner ---
+_vpn_snapshot = _vpn.status()
+if _vpn_snapshot.get("connected"):
+    _vpn_badge = f"🟢 {_vpn_snapshot['kind']}" if _vpn_snapshot.get("alive") else f"🟡 {_vpn_snapshot['kind']} (down)"
+else:
+    _vpn_badge = "⚪ off"
+_proxy_badge = "🟢 on" if (st.session_state.get("egress_proxy_url") or "").strip() else "⚪ off"
+st.caption(f"🧅 Tor: 127.0.0.1:9050 &nbsp;&nbsp; 🛡️ VPN: {_vpn_badge} &nbsp;&nbsp; 🌐 Proxy: {_proxy_badge}")
 
 # Main UI - logo and input
 _, logo_col, _ = st.columns(3)

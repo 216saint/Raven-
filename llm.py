@@ -2,7 +2,7 @@ import re
 import openai
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
-from llm_utils import _common_llm_params, resolve_model_config, get_model_choices
+from llm_utils import _common_llm_params, build_common_callbacks, resolve_model_config, get_model_choices
 from config import (
     OPENAI_API_KEY,
     ANTHROPIC_API_KEY,
@@ -32,9 +32,14 @@ def get_llm(model_choice):
     llm_class = config["class"]
     model_specific_params = config["constructor_params"]
 
-    # Combine common parameters with model-specific parameters
-    # Model-specific parameters will override common ones if there are any conflicts
-    all_params = {**_common_llm_params, **model_specific_params}
+    # Combine common parameters with model-specific parameters.
+    # Fresh callbacks per instance — BufferedStreamingHandler holds mutable buffer state
+    # that would interleave across LLMs if shared.
+    all_params = {
+        **_common_llm_params,
+        "callbacks": build_common_callbacks(),
+        **model_specific_params,
+    }
 
     # Validate that the required credentials exist before we hit the API
     _ensure_credentials(model_choice, llm_class, model_specific_params)

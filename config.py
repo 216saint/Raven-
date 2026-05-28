@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -16,7 +17,17 @@ def _clean_env(name, default=None):
 		value = value[1:-1].strip()
 	return value
 
-# Configuration variables loaded from the .env file
+
+def _clean_env_aliased(*names, default=None):
+	"""Return first non-empty env var among names. Used for RAVEN_* with legacy fallback."""
+	for n in names:
+		v = _clean_env(n)
+		if v:
+			return v
+	return default
+
+
+# LLM provider credentials
 OPENAI_API_KEY = _clean_env("OPENAI_API_KEY")
 GOOGLE_API_KEY = _clean_env("GOOGLE_API_KEY")
 ANTHROPIC_API_KEY = _clean_env("ANTHROPIC_API_KEY")
@@ -27,3 +38,7 @@ LLAMA_CPP_BASE_URL = _clean_env("LLAMA_CPP_BASE_URL")
 CUSTOM_API_BASE_URL = _clean_env("CUSTOM_API_BASE_URL")
 CUSTOM_API_KEY = _clean_env("CUSTOM_API_KEY")
 CUSTOM_API_MODEL = _clean_env("CUSTOM_API_MODEL")
+
+# --- Raven-specific (with ROBIN_* legacy alias) ---
+RAVEN_DATA_DIR = Path(_clean_env_aliased("RAVEN_DATA_DIR", "ROBIN_DATA_DIR", default=".raven"))
+RAVEN_PROXY_URL = _clean_env_aliased("RAVEN_PROXY_URL", "ROBIN_PROXY_URL")

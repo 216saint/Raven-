@@ -175,3 +175,10 @@ cython_debug/
 
 # Vscode
 .vscode
+
+# Raven
+tools/
+.raven/
+*.conf
+*.ovpn
+!.github/**/*.conf

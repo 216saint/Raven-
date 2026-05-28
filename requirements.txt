@@ -1,6 +1,6 @@
 bs4
 pysocks
-requests
+requests[socks]
 streamlit
 python-dotenv
 langchain-openai

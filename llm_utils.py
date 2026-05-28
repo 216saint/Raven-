@@ -1,5 +1,7 @@
 import config
 import requests
+import time
+from functools import wraps
 from urllib.parse import urljoin
 from langchain_openai import ChatOpenAI
 from langchain_ollama import ChatOllama
@@ -42,15 +44,47 @@ class BufferedStreamingHandler(BaseCallbackHandler):
 
 
 # --- Configuration Data ---
-# Instantiate common dependencies once
-_common_callbacks = [BufferedStreamingHandler(buffer_limit=60)]
-
-# Define common parameters for most LLMs
+# Define common parameters for most LLMs.
+# NOTE: callbacks are intentionally NOT included here. A fresh BufferedStreamingHandler
+# is created per get_llm() call to avoid shared mutable buffer state across LLM instances.
 _common_llm_params = {
     "temperature": 0,
     "streaming": True,
-    "callbacks": _common_callbacks,
 }
+
+
+def build_common_callbacks() -> list:
+    """Factory returning fresh callback handlers for each LLM instance."""
+    return [BufferedStreamingHandler(buffer_limit=60)]
+
+
+def _ttl_cache(ttl_seconds: float):
+    """Tiny TTL memoization for zero-arg fetchers. Avoids re-hitting local endpoints
+    on every Streamlit rerun (each fetch has a 3s timeout — up to ~9s saved per rerun).
+    Cache key includes config values that influence the result so changes are picked up."""
+    def decorator(func):
+        cache = {}
+
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            key = (
+                args,
+                tuple(sorted(kwargs.items())),
+                OLLAMA_BASE_URL,
+                LLAMA_CPP_BASE_URL,
+                getattr(config, "CUSTOM_API_BASE_URL", None),
+            )
+            now = time.monotonic()
+            hit = cache.get(key)
+            if hit and (now - hit[0]) < ttl_seconds:
+                return hit[1]
+            value = func(*args, **kwargs)
+            cache[key] = (now, value)
+            return value
+
+        wrapper.cache_clear = cache.clear  # type: ignore[attr-defined]
+        return wrapper
+    return decorator
 
 # Map input model choices (lowercased) to their configuration
 # Each config includes the class and any model-specific constructor parameters
@@ -190,6 +224,7 @@ def _get_ollama_base_url() -> Optional[str]:
     return OLLAMA_BASE_URL.rstrip("/") + "/"
 
 
+@_ttl_cache(ttl_seconds=30)
 def fetch_ollama_models() -> List[str]:
     """
     Retrieve the list of locally available Ollama models by querying the Ollama HTTP API.
@@ -220,6 +255,7 @@ def fetch_ollama_models() -> List[str]:
 
 
 # Added Support for llama.cpp models since they use OpenAI-compatible API
+@_ttl_cache(ttl_seconds=30)
 def fetch_llama_cpp_models() -> List[str]:
     """
     Retrieve available models from an OpenAI-compatible llama.cpp server.
@@ -238,6 +274,7 @@ def fetch_llama_cpp_models() -> List[str]:
         return []
 
 
+@_ttl_cache(ttl_seconds=30)
 def fetch_custom_api_models() -> List[str]:
     """Retrieve models from any OpenAI-compatible API endpoint."""
     if not config.CUSTOM_API_BASE_URL:
@@ -339,9 +376,9 @@ def resolve_model_config(model_choice: str):
     Supports both the predefined remote models and any locally installed Ollama models.
     """
     model_choice_lower = _normalize_model_name(model_choice)
-    config = _llm_config_map.get(model_choice_lower)
-    if config:
-        return config
+    cfg = _llm_config_map.get(model_choice_lower)
+    if cfg:
+        return cfg
 
     # llama.cpp (OpenAI-compatible)
     for llama_model in fetch_llama_cpp_models():

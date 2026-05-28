@@ -1,5 +1,9 @@
 FROM python:3.10-slim AS builder
 
+LABEL org.opencontainers.image.title="Raven"
+LABEL org.opencontainers.image.description="AI-powered dark web OSINT — fork of Robin, with optional VPN egress and simplified startup."
+LABEL org.opencontainers.image.source="https://github.com/apurvsinghgautam/robin"
+
 RUN DEBIAN_FRONTEND="noninteractive" apt-get update && \
     apt-get install -y --no-install-recommends \
       tor \

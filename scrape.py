@@ -31,6 +31,31 @@ ALLOWED_CONTENT_TYPES = ("text/html", "application/xhtml+xml", "text/plain")
 _thread_local = threading.local()
 _logger = logging.getLogger(__name__)
 
+# Optional manual egress proxy applied to non-Tor (clearweb) sessions only.
+# Set by the UI via set_egress_proxy(); .onion targets continue to use Tor SOCKS.
+_egress_proxy_url: str | None = None
+_egress_proxy_lock = threading.Lock()
+
+
+def set_egress_proxy(url: str | None) -> None:
+    """Configure an optional HTTP/SOCKS proxy for clearweb scraping.
+
+    Pass None or empty string to disable. Changing the proxy invalidates any
+    cached per-thread sessions so subsequent requests pick up the new value.
+    """
+    global _egress_proxy_url
+    cleaned = (url or "").strip() or None
+    with _egress_proxy_lock:
+        if cleaned == _egress_proxy_url:
+            return
+        _egress_proxy_url = cleaned
+    # Drop cached sessions across all threads — cheap because they're lazy.
+    _thread_local.__dict__.clear()
+
+
+def get_egress_proxy() -> str | None:
+    return _egress_proxy_url
+
 
 def _normalize_url_data(url_data):
     if not isinstance(url_data, dict):
@@ -60,6 +85,11 @@ def _build_session(use_tor=False):
         session.proxies = {
             "http": "socks5h://127.0.0.1:9050",
             "https": "socks5h://127.0.0.1:9050"
+        }
+    elif _egress_proxy_url:
+        session.proxies = {
+            "http": _egress_proxy_url,
+            "https": _egress_proxy_url,
         }
 
     return session
