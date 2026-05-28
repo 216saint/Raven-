@@ -36,15 +36,21 @@ function Write-Err ($msg) { Write-Host "XX $msg" -ForegroundColor Red }
 # ---------------------------------------------------------------------------
 Write-Step "Checking Python ..."
 $pythonCmd = $null
-foreach ($candidate in @("py -3.12", "py -3.11", "py -3.10", "python")) {
+$probes = @(
+    @{ Exe = "py";      Args = @("-3.12") },
+    @{ Exe = "py";      Args = @("-3.11") },
+    @{ Exe = "py";      Args = @("-3.10") },
+    @{ Exe = "py";      Args = @() },
+    @{ Exe = "python";  Args = @() },
+    @{ Exe = "python3"; Args = @() }
+)
+foreach ($probe in $probes) {
     try {
-        $parts = $candidate.Split(" ")
-        $exe = $parts[0]
-        $args = $parts[1..($parts.Length - 1)] + @("--version")
-        $ver = & $exe @args 2>&1
+        $probeArgs = @($probe.Args) + @("--version")
+        $ver = & $probe.Exe @probeArgs 2>&1
         if ($LASTEXITCODE -eq 0 -and $ver -match "Python 3\.(1[0-9]|[2-9][0-9])") {
-            $pythonCmd = $candidate
-            Write-Host "    found: $ver"
+            $pythonCmd = ($probe.Exe + " " + ($probe.Args -join " ")).Trim()
+            Write-Host "    found via '$pythonCmd': $ver"
             break
         }
     } catch {}
