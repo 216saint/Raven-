@@ -1,9 +1,11 @@
 
 import base64
+import io
 import json
 import streamlit as st
 from datetime import datetime
 from pathlib import Path
+from PIL import Image
 from scrape import scrape_multiple, set_egress_proxy
 from search import get_search_results
 import config as _robin_cfg
@@ -104,24 +106,375 @@ def cached_scrape_multiple(filtered: list, threads: int):
 
 # Streamlit page configuration
 st.set_page_config(
-    page_title="Raven — Dark Web OSINT (Robin fork)",
-    page_icon="🕵️‍♂️",
+    page_title="Raven // Dark Web Intelligence Terminal",
+    page_icon=".github/assets/raven.png",
     initial_sidebar_state="expanded",
 )
 
-# Custom CSS for styling
+
+@st.cache_data(show_spinner=False)
+def _raven_bg_b64() -> str:
+    """Downsample + JPEG-compress raven.png so the background data URL stays light."""
+    src = Path(".github/assets/raven.png")
+    if not src.exists():
+        return ""
+    img = Image.open(src).convert("RGB")
+    target_w = 1024
+    w, h = img.size
+    if w > target_w:
+        img = img.resize((target_w, int(h * target_w / w)), Image.LANCZOS)
+    buf = io.BytesIO()
+    img.save(buf, format="JPEG", quality=72, optimize=True)
+    return base64.b64encode(buf.getvalue()).decode("ascii")
+
+
+_RAVEN_BG = _raven_bg_b64()
+
+# ---------------------------------------------------------------------------
+# Raven design system: arcane threat-researcher terminal.
+# - Background: the raven sigil, heavily darkened, fixed — atmosphere only.
+# - Type: JetBrains Mono for HUD/headings, IBM Plex Sans body, Plex Serif italic
+#   for the oracular tagline.
+# - Palette: void indigo + electric violet primary + cyan secondary.
+# ---------------------------------------------------------------------------
 st.markdown(
-    """
+    f"""
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=IBM+Plex+Sans:wght@300;400;500;600&family=IBM+Plex+Serif:ital,wght@1,400;1,500&display=swap" rel="stylesheet">
     <style>
-            .aStyle {
-                font-size: 18px;
-                font-weight: bold;
-                padding: 5px;
-                padding-left: 0px;
-                text-align: left;
-            }
-            .colHeight { max-height: 40vh; overflow-y: auto; text-align: center; }
-            .pTitle { font-weight: bold; color: #FF4B4B; margin-bottom: 0.5em; }
+        :root {{
+            --bg-void: #0A0A14;
+            --bg-shadow: #14141F;
+            --bg-panel: rgba(20, 20, 31, 0.55);
+            --text-primary: #E8E4F3;
+            --text-secondary: #9491AE;
+            --text-muted: #5C5B72;
+            --accent-violet: #8B5CF6;
+            --accent-violet-soft: rgba(139, 92, 246, 0.18);
+            --accent-violet-glow: rgba(139, 92, 246, 0.35);
+            --accent-cyan: #22D3EE;
+            --accent-amber: #F59E0B;
+            --border-violet: rgba(139, 92, 246, 0.22);
+            --border-subtle: rgba(232, 228, 243, 0.07);
+        }}
+
+        /* ---- canvas ---- */
+        html, body, .stApp, [data-testid="stAppViewContainer"] {{
+            background-color: var(--bg-void) !important;
+            color: var(--text-primary);
+            font-family: 'IBM Plex Sans', sans-serif;
+        }}
+
+        /* Background sigil: dark vignette over the raven, fixed, low opacity */
+        .stApp {{
+            background:
+                radial-gradient(ellipse 90% 70% at 50% 35%, rgba(10,10,20,0.78) 0%, rgba(10,10,20,0.96) 75%),
+                linear-gradient(180deg, rgba(10,10,20,0.88) 0%, rgba(10,10,20,0.94) 100%),
+                url("data:image/jpeg;base64,{_RAVEN_BG}") center 25% / cover no-repeat fixed,
+                var(--bg-void) !important;
+        }}
+
+        /* Hairline scanlines for HUD texture (extremely subtle) */
+        [data-testid="stAppViewContainer"]::before {{
+            content: '';
+            position: fixed;
+            inset: 0;
+            pointer-events: none;
+            background-image: repeating-linear-gradient(
+                0deg,
+                transparent 0 3px,
+                rgba(139, 92, 246, 0.018) 3px 4px
+            );
+            z-index: 0;
+        }}
+
+        /* ---- typography ---- */
+        h1, h2, h3, h4, h5, h6 {{
+            font-family: 'JetBrains Mono', monospace !important;
+            font-weight: 600;
+            letter-spacing: 0.02em;
+        }}
+        h1 {{
+            text-transform: uppercase;
+            letter-spacing: 0.14em;
+            font-size: 1.6rem;
+        }}
+        h2 {{ font-size: 1.2rem; letter-spacing: 0.08em; text-transform: uppercase; }}
+        h3 {{ font-size: 0.95rem; letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-secondary); }}
+
+        /* Streamlit subheader (uses h3 internally) divider — violet hairline */
+        [data-testid="stHeadingWithActionElements"] hr,
+        hr {{
+            border-color: var(--border-violet) !important;
+            border-top-width: 1px;
+            opacity: 1;
+        }}
+
+        /* ---- sidebar ---- */
+        section[data-testid="stSidebar"] {{
+            background: linear-gradient(180deg, rgba(12, 12, 22, 0.94), rgba(8, 8, 16, 0.96));
+            border-right: 1px solid var(--border-violet);
+            backdrop-filter: blur(8px);
+        }}
+        section[data-testid="stSidebar"] h1 {{
+            font-size: 1.9rem;
+            line-height: 1;
+            margin-bottom: 0.1em;
+            background: linear-gradient(135deg, var(--text-primary) 0%, var(--accent-violet) 60%, var(--accent-cyan) 130%);
+            -webkit-background-clip: text;
+            background-clip: text;
+            -webkit-text-fill-color: transparent;
+            text-shadow: none;
+        }}
+        section[data-testid="stSidebar"] h3 {{
+            margin-top: 1.6rem;
+            padding-bottom: 0.4rem;
+            border-bottom: 1px solid var(--border-violet);
+        }}
+        section[data-testid="stSidebar"] [data-testid="stCaptionContainer"],
+        section[data-testid="stSidebar"] small {{
+            color: var(--text-muted);
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.72rem;
+            letter-spacing: 0.02em;
+        }}
+
+        /* ---- buttons ---- */
+        .stButton > button,
+        .stFormSubmitButton > button,
+        button[kind="secondary"],
+        button[kind="primary"] {{
+            font-family: 'JetBrains Mono', monospace !important;
+            font-weight: 500;
+            letter-spacing: 0.12em;
+            text-transform: uppercase;
+            font-size: 0.72rem !important;
+            border-radius: 2px !important;
+            border: 1px solid var(--border-violet) !important;
+            background: rgba(20, 20, 31, 0.55) !important;
+            color: var(--text-primary) !important;
+            transition: all 0.18s ease;
+            padding: 0.5em 1em !important;
+        }}
+        .stButton > button:hover,
+        .stFormSubmitButton > button:hover {{
+            border-color: var(--accent-violet) !important;
+            background: var(--accent-violet-soft) !important;
+            box-shadow: 0 0 0 1px var(--accent-violet-glow), 0 0 22px rgba(139,92,246,0.18);
+            color: #fff !important;
+        }}
+        .stFormSubmitButton > button {{
+            background: linear-gradient(135deg, rgba(139,92,246,0.85), rgba(34,211,238,0.55)) !important;
+            border-color: var(--accent-violet) !important;
+            color: #fff !important;
+        }}
+        .stFormSubmitButton > button:hover {{
+            box-shadow: 0 0 30px rgba(139,92,246,0.45);
+            transform: translateY(-1px);
+        }}
+
+        /* ---- inputs ---- */
+        .stTextInput input,
+        .stTextArea textarea,
+        .stSelectbox [data-baseweb="select"] > div,
+        .stFileUploader [data-testid="stFileUploaderDropzone"] {{
+            background: rgba(10, 10, 20, 0.6) !important;
+            border: 1px solid var(--border-subtle) !important;
+            color: var(--text-primary) !important;
+            font-family: 'JetBrains Mono', monospace !important;
+            font-size: 0.85rem !important;
+            border-radius: 2px !important;
+        }}
+        .stTextInput input:focus,
+        .stTextArea textarea:focus {{
+            border-color: var(--accent-violet) !important;
+            box-shadow: 0 0 0 2px var(--accent-violet-soft) !important;
+            outline: none !important;
+        }}
+        .stTextInput input::placeholder {{
+            color: var(--text-muted) !important;
+            font-style: italic;
+        }}
+
+        /* ---- expanders ---- */
+        details[data-testid="stExpander"] {{
+            border: 1px solid var(--border-subtle) !important;
+            border-radius: 2px !important;
+            background: rgba(15, 15, 25, 0.4) !important;
+            backdrop-filter: blur(4px);
+        }}
+        details[data-testid="stExpander"] summary {{
+            font-family: 'JetBrains Mono', monospace !important;
+            font-size: 0.78rem !important;
+            color: var(--text-secondary) !important;
+            letter-spacing: 0.05em;
+        }}
+        details[data-testid="stExpander"][open] {{
+            border-color: var(--border-violet) !important;
+        }}
+
+        /* ---- code & inline tokens ---- */
+        code, .stMarkdown code {{
+            background: rgba(139, 92, 246, 0.1) !important;
+            color: var(--accent-cyan) !important;
+            font-family: 'JetBrains Mono', monospace !important;
+            padding: 0.08em 0.4em !important;
+            border-radius: 2px !important;
+            border: 1px solid var(--border-violet) !important;
+            font-size: 0.85em !important;
+        }}
+
+        /* ---- existing pipeline-stage stat cards (Refined/Search/Filtered) ---- */
+        .pTitle {{
+            font-family: 'JetBrains Mono', monospace !important;
+            font-size: 0.65rem !important;
+            text-transform: uppercase;
+            letter-spacing: 0.28em;
+            color: var(--accent-violet) !important;
+            margin-bottom: 0.6em !important;
+            text-shadow: 0 0 14px var(--accent-violet-glow);
+        }}
+        .colHeight {{
+            max-height: 40vh;
+            overflow-y: auto;
+            text-align: center;
+            font-family: 'IBM Plex Sans', sans-serif;
+            color: var(--text-primary);
+        }}
+
+        /* ---- raven HUD: network status strip above the search input ---- */
+        .raven-hud {{
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.7rem;
+            letter-spacing: 0.18em;
+            text-transform: uppercase;
+            color: var(--text-secondary);
+            background: linear-gradient(90deg, rgba(15,15,25,0.7), rgba(15,15,25,0.45));
+            border: 1px solid var(--border-violet);
+            border-left: 3px solid var(--accent-violet);
+            padding: 0.65em 1.2em;
+            border-radius: 2px;
+            backdrop-filter: blur(6px);
+            margin: 0.5rem 0 1.5rem 0;
+            display: flex;
+            gap: 2.5rem;
+            align-items: center;
+            justify-content: center;
+            flex-wrap: wrap;
+        }}
+        .raven-hud b {{ color: var(--accent-violet); font-weight: 500; margin-right: 0.5em; }}
+        .raven-hud em {{ font-style: normal; color: var(--text-primary); }}
+        .raven-hud .ok  {{ color: #4ADE80; }}
+        .raven-hud .off {{ color: var(--text-muted); }}
+        .raven-hud .warn {{ color: var(--accent-amber); }}
+
+        /* ---- brand block ---- */
+        .raven-brand {{
+            text-align: center;
+            margin: 1.5rem 0 0.5rem 0;
+            position: relative;
+        }}
+        .raven-brand-mark {{
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.62rem;
+            letter-spacing: 0.6em;
+            color: var(--accent-violet);
+            margin-bottom: 1.2em;
+            opacity: 0.55;
+        }}
+        .raven-brand-mark::before, .raven-brand-mark::after {{
+            content: '◆';
+            color: var(--accent-violet);
+            margin: 0 1.8em;
+            opacity: 0.7;
+        }}
+        .raven-brand-title {{
+            font-family: 'JetBrains Mono', monospace;
+            font-weight: 700;
+            font-size: clamp(2.4rem, 6vw, 4rem);
+            letter-spacing: 0.32em;
+            color: var(--text-primary);
+            margin: 0;
+            background: linear-gradient(180deg, var(--text-primary) 0%, var(--accent-violet) 130%);
+            -webkit-background-clip: text;
+            background-clip: text;
+            -webkit-text-fill-color: transparent;
+            text-shadow: 0 0 60px rgba(139, 92, 246, 0.18);
+        }}
+        .raven-brand-tagline {{
+            font-family: 'IBM Plex Serif', serif;
+            font-style: italic;
+            font-weight: 400;
+            font-size: 0.95rem;
+            color: var(--text-secondary);
+            margin: 0.2em 0 0 0;
+            letter-spacing: 0.04em;
+        }}
+        .raven-brand-rule {{
+            display: block;
+            width: 80px;
+            height: 1px;
+            margin: 1.4rem auto 0.4rem auto;
+            background: linear-gradient(90deg, transparent, var(--accent-violet), transparent);
+        }}
+
+        /* ---- query form: make it feel like a console prompt ---- */
+        [data-testid="stForm"] {{
+            border: 1px solid var(--border-violet) !important;
+            border-radius: 3px !important;
+            background: rgba(15, 15, 25, 0.55) !important;
+            padding: 1rem !important;
+            backdrop-filter: blur(8px);
+            box-shadow: 0 0 0 1px var(--border-subtle), 0 4px 40px rgba(0,0,0,0.4);
+        }}
+        [data-testid="stForm"] .stTextInput input {{
+            border: none !important;
+            background: transparent !important;
+            font-size: 1.05rem !important;
+            padding-left: 1.6em !important;
+        }}
+        [data-testid="stForm"] .stTextInput::before {{
+            content: '▸';
+            position: absolute;
+            margin-top: 0.4em;
+            margin-left: 0.5em;
+            color: var(--accent-violet);
+            font-family: 'JetBrains Mono', monospace;
+            z-index: 2;
+            font-size: 1rem;
+        }}
+
+        /* ---- sliders ---- */
+        .stSlider [data-baseweb="slider"] > div > div > div {{ background: var(--accent-violet) !important; }}
+        .stSlider [data-baseweb="slider"] [role="slider"] {{
+            background: var(--accent-violet) !important;
+            border: 2px solid var(--text-primary) !important;
+            box-shadow: 0 0 12px var(--accent-violet-glow) !important;
+        }}
+
+        /* ---- alerts ---- */
+        [data-testid="stAlert"] {{
+            background: rgba(15, 15, 25, 0.7) !important;
+            border-left: 3px solid var(--accent-violet) !important;
+            border-radius: 2px !important;
+            backdrop-filter: blur(6px);
+        }}
+
+        /* ---- captions ---- */
+        [data-testid="stCaptionContainer"] {{
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.72rem !important;
+            color: var(--text-muted) !important;
+            letter-spacing: 0.03em;
+        }}
+
+        /* ---- Streamlit chrome ---- */
+        [data-testid="stToolbar"], [data-testid="stDecoration"], #MainMenu, footer {{ display: none !important; }}
+        header[data-testid="stHeader"] {{ background: transparent !important; }}
+
+        /* Make main container content sit above the scanlines */
+        .main, [data-testid="stMain"], section.main {{ position: relative; z-index: 1; }}
     </style>""",
     unsafe_allow_html=True,
 )
@@ -405,30 +758,54 @@ else:
     st.sidebar.caption("No saved investigations yet.")
 
 
-# --- Network status banner ---
+# --- Raven brand mark ---
+st.markdown(
+    """
+    <div class="raven-brand">
+        <div class="raven-brand-mark">DARK-WEB INTELLIGENCE</div>
+        <h1 class="raven-brand-title">RAVEN</h1>
+        <p class="raven-brand-tagline">an oracle for the unindexed deep — sees what others cannot</p>
+        <span class="raven-brand-rule"></span>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
+
+# --- Network egress HUD ---
 _vpn_snapshot = _vpn.status()
 if _vpn_snapshot.get("connected"):
-    _vpn_badge = f"🟢 {_vpn_snapshot['kind']}" if _vpn_snapshot.get("alive") else f"🟡 {_vpn_snapshot['kind']} (down)"
+    if _vpn_snapshot.get("alive"):
+        _vpn_html = f"<em class='ok'>{_vpn_snapshot['kind']}</em>"
+    else:
+        _vpn_html = f"<em class='warn'>{_vpn_snapshot['kind']} ↓ down</em>"
 else:
-    _vpn_badge = "⚪ off"
-_proxy_badge = "🟢 on" if (st.session_state.get("egress_proxy_url") or "").strip() else "⚪ off"
-st.caption(f"🧅 Tor: 127.0.0.1:9050 &nbsp;&nbsp; 🛡️ VPN: {_vpn_badge} &nbsp;&nbsp; 🌐 Proxy: {_proxy_badge}")
-
-# Main UI - logo and input
-_, logo_col, _ = st.columns(3)
-with logo_col:
-    st.image(".github/assets/robin_logo.png", width=200)
+    _vpn_html = "<em class='off'>offline</em>"
+_proxy_html = (
+    "<em class='ok'>active</em>"
+    if (st.session_state.get("egress_proxy_url") or "").strip()
+    else "<em class='off'>offline</em>"
+)
+st.markdown(
+    f"""
+    <div class="raven-hud">
+        <span><b>TOR</b><em class='ok'>127.0.0.1:9050</em></span>
+        <span><b>VPN</b>{_vpn_html}</span>
+        <span><b>PROXY</b>{_proxy_html}</span>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
 
 # Display text box and button
 with st.form("search_form", clear_on_submit=True):
     col_input, col_button = st.columns([10, 1])
     query = col_input.text_input(
-        "Enter Dark Web Search Query",
-        placeholder="Enter Dark Web Search Query",
+        "Query",
+        placeholder="query the deep // ransomware leak credentials onion forum...",
         label_visibility="collapsed",
         key="query_input",
     )
-    run_button = col_button.form_submit_button("Run")
+    run_button = col_button.form_submit_button("Probe")
 
 # Display loaded investigation (if any)
 if "loaded_investigation" in st.session_state and not run_button:
@@ -443,7 +820,7 @@ if "loaded_investigation" in st.session_state and not run_button:
             title = item.get("title", "Untitled")
             link = item.get("link", "")
             st.markdown(f"{i}. [{title}]({link})")
-    st.subheader(":red[🔎 Findings]", anchor=None, divider="gray")
+    st.subheader(":violet[🔎 Findings]", anchor=None, divider="gray")
     st.markdown(inv["summary"])
     if st.button("✖ Clear"):
         del st.session_state["loaded_investigation"]
@@ -524,7 +901,7 @@ if run_button and query:
     st.session_state.streamed_summary = ""
 
     with findings_placeholder.container():
-        st.subheader(":red[🔎 Findings]", anchor=None, divider="gray")
+        st.subheader(":violet[🔎 Findings]", anchor=None, divider="gray")
         summary_slot = st.empty()
 
     def ui_emit(chunk: str):
@@ -569,7 +946,7 @@ if run_button and query:
                 st.markdown(f"{i}. [{title}]({link})")
 
     with findings_placeholder.container():
-        st.subheader(":red[🔎 Findings]", anchor=None, divider="gray")
+        st.subheader(":violet[🔎 Findings]", anchor=None, divider="gray")
         st.markdown(st.session_state.streamed_summary)
         now = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
         fname = f"summary_{now}.md"
