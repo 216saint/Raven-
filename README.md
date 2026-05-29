@@ -12,10 +12,12 @@
    </p>
 </div>
 
-> Raven keeps Robin's pipeline (search → filter → scrape → summarize via an LLM) and adds three things:
+> Raven keeps Robin's pipeline (search → filter → scrape → summarize via an LLM) and adds five things:
 > 1. **Stability fixes** for the LLM integration layer (bugs that broke custom providers, shared streaming state, stale model defaults).
 > 2. **Opt-in egress security** — manual proxy + WireGuard / OpenVPN tunnel on top of Tor.
 > 3. **Frictionless Windows startup** — a native PowerShell launcher. No WSL2, no `apt install tor`.
+> 4. **Refined prompts** that demand concrete artifacts with dates, sources, and severity — no generic threat-landscape prose.
+> 5. **EN / PT-BR** UI + LLM output, plus a **Dark Web + OSINT** search profile that adds Intelligence X / DDoSecrets / Wayback Machine alongside the .onion engines.
 
 <div align="center">
    <img src=".github/assets/screen-ui.png" alt="Raven UI" width="850" />

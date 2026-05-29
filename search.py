@@ -44,71 +44,147 @@ SEARCH_ENGINES = [
 # Backward-compatible flat list used by existing search logic
 DEFAULT_SEARCH_ENGINES = [e["url"] for e in SEARCH_ENGINES]
 
-def get_tor_session():
+# Curated clearnet OSINT sources — only included when the user selects the
+# "Dark Web + OSINT" search profile. These are reachable without Tor and
+# index leaks, paste sites, breach repositories, and historical web content.
+#
+# Notes:
+# - These endpoints render HTML aimed at humans, so result extraction is
+#   best-effort (same as the .onion engines).
+# - We deliberately do NOT include the CIA tipline .onion as a search target —
+#   it has no query interface. It is referenced in the LLM system prompt as a
+#   cross-reference for OPSEC/whistleblower guidance, alongside the Darknet
+#   Bible primer.
+OSINT_SOURCES = [
+    {
+        "name": "Intelligence X",
+        "url": "https://intelx.io/?s={query}",
+        "needs_tor": False,
+    },
+    {
+        "name": "DDoSecrets",
+        "url": "https://ddosecrets.com/wiki/Special:Search?search={query}",
+        "needs_tor": False,
+    },
+    {
+        "name": "Wayback Machine",
+        "url": "https://web.archive.org/web/2024*/{query}",
+        "needs_tor": False,
+    },
+]
+
+OSINT_SOURCE_URLS = [s["url"] for s in OSINT_SOURCES]
+
+def _build_session(use_tor: bool) -> requests.Session:
     session = requests.Session()
     retry = Retry(
         total=3,
         read=3,
         connect=3,
         backoff_factor=0.5,
-        status_forcelist=[500, 502, 503, 504]
+        status_forcelist=[500, 502, 503, 504],
     )
     adapter = HTTPAdapter(max_retries=retry)
     session.mount("http://", adapter)
     session.mount("https://", adapter)
-    session.proxies = {
-        "http": "socks5h://127.0.0.1:9050",
-        "https": "socks5h://127.0.0.1:9050"
-    }
+    if use_tor:
+        session.proxies = {
+            "http": "socks5h://127.0.0.1:9050",
+            "https": "socks5h://127.0.0.1:9050",
+        }
     return session
 
+
+def get_tor_session():
+    return _build_session(use_tor=True)
+
+
 def fetch_search_results(endpoint, query):
+    """Fetch results from a single search endpoint.
+
+    Routes onion endpoints through Tor and clearnet OSINT sources through the
+    direct connection (or the user's egress proxy, which the requests library
+    picks up via HTTP_PROXY/HTTPS_PROXY env if set — kept out-of-band here).
+    For OSINT sources we accept both onion AND clearnet links in the returned
+    results, since some of those pages reference leaked .onion sites.
+    """
     url = endpoint.format(query=query)
+    use_tor = ".onion" in endpoint
+    accept_clearnet = not use_tor  # OSINT pages frequently link to clearnet leaks too
     headers = {"User-Agent": random.choice(USER_AGENTS)}
-    session = get_tor_session()
-    
+    session = _build_session(use_tor=use_tor)
+
     try:
         response = session.get(url, headers=headers, timeout=40)
-        if response.status_code == 200:
-            soup = BeautifulSoup(response.text, "html.parser")
-            links = []
-            # Generic parsing for standard search engine layouts
-            for a in soup.find_all('a'):
-                try:
-                    href = a['href']
-                    title = a.get_text(strip=True)
-                    # Extract onion links
-                    link = re.findall(r'https?:\/\/[a-z0-9\.]+\.onion.*', href)
-                    if len(link) != 0:
-                        # Basic filtering to avoid self-referential links
-                        if "search" not in link[0] and len(title) > 3:
-                            links.append({"title": title, "link": link[0]})
-                except:
-                    continue
-            return links
-        else:
+        if response.status_code != 200:
             return []
-    except:
+        soup = BeautifulSoup(response.text, "html.parser")
+        links = []
+        seen = set()
+        for a in soup.find_all('a'):
+            try:
+                href = a.get('href') or ''
+                title = a.get_text(strip=True)
+                if len(title) <= 3:
+                    continue
+                # Onion links — primary harvest from any source
+                onion_match = re.findall(r'https?:\/\/[a-z0-9\.\-]+\.onion[^\s"\'<>]*', href)
+                if onion_match:
+                    candidate = onion_match[0]
+                    if "search" not in candidate and candidate not in seen:
+                        seen.add(candidate)
+                        links.append({"title": title, "link": candidate})
+                        continue
+                # Clearnet links — only kept from OSINT sources, and only if
+                # they look like leak/breach/paste pages (heuristic filter).
+                if accept_clearnet:
+                    clear_match = re.findall(r'https?:\/\/[^\s"\'<>]+', href)
+                    if clear_match:
+                        candidate = clear_match[0]
+                        if candidate in seen:
+                            continue
+                        low = candidate.lower()
+                        if any(tok in low for tok in (
+                            "leak", "breach", "dump", "paste", "torrent",
+                            "archive.org/web", "ddosecrets", "intelx",
+                        )):
+                            seen.add(candidate)
+                            links.append({"title": title, "link": candidate})
+            except Exception:
+                continue
+        return links
+    except Exception:
         return []
 
-def get_search_results(refined_query, max_workers=5):
+
+def get_search_results(refined_query, max_workers=5, include_osint=False):
+    """Query the dark-web engines (and optionally OSINT clearnet sources) and
+    return a deduplicated list of {title, link} dicts.
+    """
+    endpoints = list(DEFAULT_SEARCH_ENGINES)
+    if include_osint:
+        endpoints += OSINT_SOURCE_URLS
+
     results = []
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = [executor.submit(fetch_search_results, endpoint, refined_query)
-                   for endpoint in DEFAULT_SEARCH_ENGINES]
+                   for endpoint in endpoints]
         for future in as_completed(futures):
-            result_urls = future.result()
+            try:
+                result_urls = future.result()
+            except Exception:
+                result_urls = []
             results.extend(result_urls)
 
-    # Deduplicate results
     seen_links = set()
     unique_results = []
     for res in results:
         link = res.get("link")
-        # Remove trailing slashes for better deduplication
+        if not link:
+            continue
         clean_link = link.rstrip('/')
         if clean_link not in seen_links:
             seen_links.add(clean_link)
             unique_results.append(res)
-            
+
     return unique_results

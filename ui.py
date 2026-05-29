@@ -10,6 +10,7 @@ from scrape import scrape_multiple, set_egress_proxy
 from search import get_search_results
 import config as _robin_cfg
 import vpn as _vpn
+from i18n import t, LANGS
 from llm_utils import BufferedStreamingHandler, get_model_choices, get_model_display_names
 from llm import get_llm, refine_query, filter_results, generate_summary, PRESET_PROMPTS
 from config import (
@@ -95,8 +96,12 @@ def load_investigations() -> list:
 
 # Cache expensive backend calls
 @st.cache_data(ttl=200, show_spinner=False)
-def cached_search_results(refined_query: str, threads: int):
-    return get_search_results(refined_query.replace(" ", "+"), max_workers=threads)
+def cached_search_results(refined_query: str, threads: int, include_osint: bool = False):
+    return get_search_results(
+        refined_query.replace(" ", "+"),
+        max_workers=threads,
+        include_osint=include_osint,
+    )
 
 
 @st.cache_data(ttl=200, show_spinner=False)
@@ -518,6 +523,68 @@ st.markdown(
 
         /* Make main container content sit above the scanlines */
         .main, [data-testid="stMain"], section.main {{ position: relative; z-index: 1; }}
+
+        /* ---- animations (GPU-friendly, no JS, < 1s total) ---- */
+        @keyframes raven-fade-up {{
+            from {{ opacity: 0; transform: translate3d(0, 8px, 0); }}
+            to   {{ opacity: 1; transform: translate3d(0, 0, 0); }}
+        }}
+        @keyframes raven-pulse-glow {{
+            0%, 100% {{ box-shadow: 0 0 0 0 var(--accent-violet-soft); }}
+            50%      {{ box-shadow: 0 0 0 8px transparent; }}
+        }}
+        @keyframes raven-shimmer {{
+            0%   {{ background-position: -200% 0; }}
+            100% {{ background-position: 200% 0; }}
+        }}
+        @keyframes raven-bg-breathe {{
+            0%, 100% {{ transform: scale(1.0); }}
+            50%      {{ transform: scale(1.025); }}
+        }}
+
+        /* Slow, breathing background for atmosphere — runs once per 30s */
+        .stApp {{
+            animation: raven-bg-breathe 30s ease-in-out infinite;
+        }}
+
+        /* Brand entrance — staggered fade-up */
+        .raven-brand-mark   {{ animation: raven-fade-up 0.55s ease-out  0.05s both; }}
+        .raven-brand-title  {{ animation: raven-fade-up 0.65s ease-out  0.15s both; }}
+        .raven-brand-tagline{{ animation: raven-fade-up 0.65s ease-out  0.30s both; }}
+        .raven-brand-rule   {{ animation: raven-fade-up 0.45s ease-out  0.45s both; }}
+        .raven-hud          {{ animation: raven-fade-up 0.55s ease-out  0.55s both; }}
+        [data-testid="stForm"] {{ animation: raven-fade-up 0.55s ease-out 0.65s both; }}
+
+        /* Pulse the violet bar on the HUD when any layer is active */
+        .raven-hud {{ transition: border-left-color 0.6s ease; }}
+        .raven-hud.alive {{ animation: raven-pulse-glow 2.4s ease-in-out infinite; }}
+
+        /* Smooth fades for stat cards */
+        [data-testid="stContainer"]:has(.pTitle) {{
+            transition: transform 0.18s ease, box-shadow 0.18s ease;
+        }}
+        [data-testid="stContainer"]:has(.pTitle):hover {{
+            transform: translateY(-2px);
+            box-shadow: 0 6px 24px rgba(139, 92, 246, 0.15);
+        }}
+
+        /* Spinner — restyle Streamlit's default to match palette */
+        .stSpinner > div > div {{
+            border-color: var(--accent-violet) transparent var(--accent-violet) transparent !important;
+        }}
+        .stSpinner > div {{
+            color: var(--text-secondary) !important;
+            font-family: 'JetBrains Mono', monospace !important;
+            font-size: 0.78rem !important;
+            letter-spacing: 0.08em !important;
+        }}
+
+        /* Brand title — shimmer accent on the violet stop */
+        .raven-brand-title {{
+            background-size: 200% 200%;
+            animation: raven-fade-up 0.65s ease-out 0.15s both,
+                       raven-shimmer 8s linear 1s infinite;
+        }}
     </style>""",
     unsafe_allow_html=True,
 )
@@ -530,7 +597,27 @@ st.sidebar.caption(
     "Fork of [Robin](https://github.com/apurvsinghgautam/robin) by "
     "[Apurv Singh Gautam](https://www.linkedin.com/in/apurvsinghgautam/)."
 )
-st.sidebar.subheader("Settings")
+# --- Language selector (drives all UI strings + LLM output language) ---
+if "lang" not in st.session_state:
+    st.session_state["lang"] = "en"
+
+_lang_label = LANGS[st.session_state["lang"]]
+_lang_keys = list(LANGS.keys())
+_chosen_lang_label = st.sidebar.selectbox(
+    t("language_label", st.session_state["lang"]),
+    [LANGS[k] for k in _lang_keys],
+    index=_lang_keys.index(st.session_state["lang"]),
+    key="lang_select",
+)
+# Reverse-lookup the code from the label
+for _k, _v in LANGS.items():
+    if _v == _chosen_lang_label and _k != st.session_state["lang"]:
+        st.session_state["lang"] = _k
+        st.rerun()
+
+LANG = st.session_state["lang"]
+
+st.sidebar.subheader(t("settings", LANG))
 def _env_is_set(value) -> bool:
     return bool(value and str(value).strip() and "your_" not in str(value))
 
@@ -583,7 +670,7 @@ model = st.sidebar.selectbox(
 if any(name not in {"gpt4o", "gpt-4.1", "claude-3-5-sonnet-latest", "llama3.1", "gemini-2.5-flash"} for name in model_options):
     st.sidebar.caption("Locally detected Ollama models are automatically added to this list.")
 
-with st.sidebar.expander("🔌 Custom API Provider"):
+with st.sidebar.expander(t("custom_api_provider", LANG)):
     st.text_input(
         "Base URL",
         key="custom_api_url",
@@ -606,7 +693,7 @@ with st.sidebar.expander("🔌 Custom API Provider"):
 if "egress_proxy_url" not in st.session_state:
     st.session_state["egress_proxy_url"] = _robin_cfg.RAVEN_PROXY_URL or ""
 
-with st.sidebar.expander("🌐 Network egress (proxy)"):
+with st.sidebar.expander(t("egress_proxy", LANG)):
     st.text_input(
         "HTTP/SOCKS proxy URL",
         key="egress_proxy_url",
@@ -621,7 +708,7 @@ with st.sidebar.expander("🌐 Network egress (proxy)"):
 set_egress_proxy(st.session_state["egress_proxy_url"].strip() or None)
 
 # --- VPN tunnel (optional, opt-in) ---
-with st.sidebar.expander("🛡️ VPN tunnel"):
+with st.sidebar.expander(t("vpn_tunnel", LANG)):
     _vpn_status = _vpn.status()
     if _vpn_status.get("connected"):
         badge = "🟢" if _vpn_status.get("alive") else "🟡"
@@ -666,18 +753,30 @@ with st.sidebar.expander("🛡️ VPN tunnel"):
             help="During a scrape job, cancel pending work if the tunnel interface dies. Does not touch system firewall.",
         )
 
-threads = st.sidebar.slider("Scraping Threads", 1, 16, 4, key="thread_slider")
+# --- Search profile (dark web only vs + OSINT clearnet) ---
+_profile_options = [t("profile_darkweb", LANG), t("profile_osint", LANG)]
+_chosen_profile = st.sidebar.radio(
+    t("search_profile", LANG),
+    _profile_options,
+    index=0,
+    horizontal=False,
+    key="search_profile_radio",
+    help=t("profile_help", LANG),
+)
+INCLUDE_OSINT = (_chosen_profile == _profile_options[1])
+
+threads = st.sidebar.slider(t("scraping_threads", LANG), 1, 16, 4, key="thread_slider")
 max_results = st.sidebar.slider(
-    "Max Results to Filter", 10, 100, 50, key="max_results_slider",
+    t("max_filter", LANG), 10, 100, 50, key="max_results_slider",
     help="Cap the number of raw search results passed to the LLM filter step.",
 )
 max_scrape = st.sidebar.slider(
-    "Max Pages to Scrape", 3, 20, 10, key="max_scrape_slider",
+    t("max_scrape", LANG), 3, 20, 10, key="max_scrape_slider",
     help="Cap the number of filtered results that get scraped for content.",
 )
 
 st.sidebar.divider()
-st.sidebar.subheader("Provider Configuration")
+st.sidebar.subheader(t("provider_config", LANG))
 _providers = [
     ("OpenAI",      OPENAI_API_KEY,     True),
     ("Anthropic",   ANTHROPIC_API_KEY,  True),
@@ -694,7 +793,7 @@ for name, value, is_cloud in _providers:
     else:
         st.sidebar.markdown(f"&ensp;🔵 **{name}** — not configured *(optional)*")
 
-with st.sidebar.expander("⚙️ Prompt Settings"):
+with st.sidebar.expander(t("prompt_settings", LANG)):
     preset_options = {
         "🔍 Dark Web Threat Intel": "threat_intel",
         "🦠 Ransomware / Malware Focus": "ransomware_malware",
@@ -729,7 +828,7 @@ with st.sidebar.expander("⚙️ Prompt Settings"):
 
 # --- Health Checks ---
 st.sidebar.divider()
-st.sidebar.subheader("Health Checks")
+st.sidebar.subheader(t("health_checks", LANG))
 
 # LLM Health Check
 if st.sidebar.button("🔌 Check LLM Connection", use_container_width=True):
@@ -824,11 +923,11 @@ else:
 
 # --- Raven brand mark ---
 st.markdown(
-    """
+    f"""
     <div class="raven-brand">
-        <div class="raven-brand-mark">DARK-WEB INTELLIGENCE</div>
+        <div class="raven-brand-mark">{t("brand_eyebrow", LANG)}</div>
         <h1 class="raven-brand-title">RAVEN</h1>
-        <p class="raven-brand-tagline">an oracle for the unindexed deep — sees what others cannot</p>
+        <p class="raven-brand-tagline">{t("brand_tagline", LANG)}</p>
         <span class="raven-brand-rule"></span>
     </div>
     """,
@@ -845,16 +944,18 @@ if _vpn_snapshot.get("connected"):
 else:
     _vpn_html = "<em class='off'>offline</em>"
 _proxy_html = (
-    "<em class='ok'>active</em>"
+    f"<em class='ok'>{t('hud_on', LANG)}</em>"
     if (st.session_state.get("egress_proxy_url") or "").strip()
-    else "<em class='off'>offline</em>"
+    else f"<em class='off'>{t('hud_off', LANG)}</em>"
 )
+# Add the .alive class if VPN or Proxy is engaged → pulse the violet bar
+_hud_alive_class = "alive" if (_vpn_snapshot.get("connected") or (st.session_state.get("egress_proxy_url") or "").strip()) else ""
 st.markdown(
     f"""
-    <div class="raven-hud">
-        <span><b>TOR</b><em class='ok'>127.0.0.1:9050</em></span>
-        <span><b>VPN</b>{_vpn_html}</span>
-        <span><b>PROXY</b>{_proxy_html}</span>
+    <div class="raven-hud {_hud_alive_class}">
+        <span><b>{t('hud_tor', LANG)}</b><em class='ok'>127.0.0.1:9050</em></span>
+        <span><b>{t('hud_vpn', LANG)}</b>{_vpn_html}</span>
+        <span><b>{t('hud_proxy', LANG)}</b>{_proxy_html}</span>
     </div>
     """,
     unsafe_allow_html=True,
@@ -865,17 +966,17 @@ with st.form("search_form", clear_on_submit=True):
     col_input, col_button = st.columns([10, 1])
     query = col_input.text_input(
         "Query",
-        placeholder="query the deep // ransomware leak credentials onion forum...",
+        placeholder=t("query_placeholder", LANG),
         label_visibility="collapsed",
         key="query_input",
     )
-    run_button = col_button.form_submit_button("Probe")
+    run_button = col_button.form_submit_button(t("submit_button", LANG))
 
 # Display loaded investigation (if any)
 if "loaded_investigation" in st.session_state and not run_button:
     inv = st.session_state["loaded_investigation"]
     st.info(f"📂 **{inv['query']}** — {inv['timestamp'][:16]}")
-    with st.expander("📋 Notes", expanded=False):
+    with st.expander(t("notes_section", LANG), expanded=False):
         st.markdown(f"**Refined Query:** `{inv['refined_query']}`")
         st.markdown(f"**Model:** `{inv['model']}` &nbsp;&nbsp; **Domain:** {inv['preset']}")
         st.markdown(f"**Sources:** {len(inv['sources'])}")
@@ -884,7 +985,7 @@ if "loaded_investigation" in st.session_state and not run_button:
             title = item.get("title", "Untitled")
             link = item.get("link", "")
             st.markdown(f"{i}. [{title}]({link})")
-    st.subheader(":violet[🔎 Findings]", anchor=None, divider="gray")
+    st.subheader(f":violet[{t('findings_section', LANG)}]", anchor=None, divider="gray")
     st.markdown(inv["summary"])
     if st.button("✖ Clear"):
         del st.session_state["loaded_investigation"]
@@ -908,7 +1009,7 @@ if run_button and query:
 
     # Stage 1 - Load LLM
     with status_slot.container():
-        with st.spinner("🔄 Loading LLM..."):
+        with st.spinner(t("stage_load_llm", LANG)):
             try:
                 llm = get_llm(model)
             except Exception as e:
@@ -916,33 +1017,33 @@ if run_button and query:
 
     # Stage 2 - Refine query
     with status_slot.container():
-        with st.spinner("🔄 Refining query..."):
+        with st.spinner(t("stage_refine", LANG)):
             try:
                 st.session_state.refined = refine_query(llm, query)
             except Exception as e:
                 _render_pipeline_error("refine the query", e)
     p1.container(border=True).markdown(
-        f"<div class='colHeight'><p class='pTitle'>Refined Query</p><p>{st.session_state.refined}</p></div>",
+        f"<div class='colHeight'><p class='pTitle'>{t('stat_refined', LANG)}</p><p>{st.session_state.refined}</p></div>",
         unsafe_allow_html=True,
     )
 
     # Stage 3 - Search dark web
     with status_slot.container():
-        with st.spinner("🔍 Searching dark web..."):
+        with st.spinner(t("stage_search", LANG)):
             st.session_state.results = cached_search_results(
-                st.session_state.refined, threads
+                st.session_state.refined, threads, INCLUDE_OSINT
             )
     # Cap results before LLM filter step
     if len(st.session_state.results) > max_results:
         st.session_state.results = st.session_state.results[:max_results]
     p2.container(border=True).markdown(
-        f"<div class='colHeight'><p class='pTitle'>Search Results</p><p>{len(st.session_state.results)}</p></div>",
+        f"<div class='colHeight'><p class='pTitle'>{t('stat_results', LANG)}</p><p>{len(st.session_state.results)}</p></div>",
         unsafe_allow_html=True,
     )
 
     # Stage 4 - Filter results
     with status_slot.container():
-        with st.spinner("🗂️ Filtering results..."):
+        with st.spinner(t("stage_filter", LANG)):
             st.session_state.filtered = filter_results(
                 llm, st.session_state.refined, st.session_state.results
             )
@@ -950,13 +1051,13 @@ if run_button and query:
     if len(st.session_state.filtered) > max_scrape:
         st.session_state.filtered = st.session_state.filtered[:max_scrape]
     p3.container(border=True).markdown(
-        f"<div class='colHeight'><p class='pTitle'>Filtered Results</p><p>{len(st.session_state.filtered)}</p></div>",
+        f"<div class='colHeight'><p class='pTitle'>{t('stat_filtered', LANG)}</p><p>{len(st.session_state.filtered)}</p></div>",
         unsafe_allow_html=True,
     )
 
     # Stage 5 - Scrape content
     with status_slot.container():
-        with st.spinner("📜 Scraping content..."):
+        with st.spinner(t("stage_scrape", LANG)):
             st.session_state.scraped = cached_scrape_multiple(
                 st.session_state.filtered, threads
             )
@@ -973,12 +1074,13 @@ if run_button and query:
         summary_slot.markdown(st.session_state.streamed_summary)
 
     with status_slot.container():
-        with st.spinner("✍️ Generating summary..."):
+        with st.spinner(t("stage_summarize", LANG)):
             stream_handler = BufferedStreamingHandler(ui_callback=ui_emit)
             llm.callbacks = [stream_handler]
             _ = generate_summary(
                 llm, query, st.session_state.scraped,
                 preset=selected_preset, custom_instructions=custom_instructions,
+                language=LANG,
             )
 
     # Save investigation (persist to investigations/ as JSON)
@@ -991,9 +1093,9 @@ if run_button and query:
             sources=st.session_state.filtered,
             summary=st.session_state.streamed_summary,
         )
-        st.toast(f"💾 Saved as `{_fname}`", icon="🪶")
+        st.toast(f"💾 {t('toast_saved', LANG)} `{_fname}`", icon="🪶")
     except Exception as _save_err:
-        st.toast(f"⚠️ Could not save investigation: {_save_err}", icon="⚠️")
+        st.toast(f"⚠️ {t('toast_save_failed', LANG)} {_save_err}", icon="⚠️")
 
     # Render organized sections
     with notes_placeholder.container():
