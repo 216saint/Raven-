@@ -166,12 +166,11 @@ st.markdown(
             font-family: 'IBM Plex Sans', sans-serif;
         }}
 
-        /* Background sigil: dark vignette over the raven, fixed, low opacity */
+        /* Background sigil: the raven is visible — vignette darkens only the edges */
         .stApp {{
             background:
-                radial-gradient(ellipse 90% 70% at 50% 35%, rgba(10,10,20,0.78) 0%, rgba(10,10,20,0.96) 75%),
-                linear-gradient(180deg, rgba(10,10,20,0.88) 0%, rgba(10,10,20,0.94) 100%),
-                url("data:image/jpeg;base64,{_RAVEN_BG}") center 25% / cover no-repeat fixed,
+                radial-gradient(ellipse 65% 55% at 50% 38%, rgba(10,10,20,0.30) 0%, rgba(10,10,20,0.72) 60%, rgba(10,10,20,0.93) 100%),
+                url("data:image/jpeg;base64,{_RAVEN_BG}") center 22% / cover no-repeat fixed,
                 var(--bg-void) !important;
         }}
 
@@ -470,8 +469,52 @@ st.markdown(
         }}
 
         /* ---- Streamlit chrome ---- */
-        [data-testid="stToolbar"], [data-testid="stDecoration"], #MainMenu, footer {{ display: none !important; }}
-        header[data-testid="stHeader"] {{ background: transparent !important; }}
+        /* Hide menu/footer/decoration BUT keep the sidebar toggle accessible */
+        #MainMenu, footer, [data-testid="stDecoration"], [data-testid="stStatusWidget"] {{
+            display: none !important;
+        }}
+        header[data-testid="stHeader"] {{
+            background: transparent !important;
+            backdrop-filter: blur(2px);
+        }}
+        /* Force the sidebar expand button to be visible and styled when sidebar is closed */
+        [data-testid="collapsedControl"],
+        [data-testid="stSidebarCollapseButton"],
+        button[kind="header"] {{
+            display: flex !important;
+            visibility: visible !important;
+            opacity: 1 !important;
+            z-index: 999 !important;
+        }}
+        [data-testid="collapsedControl"] button,
+        [data-testid="stSidebarCollapseButton"] button,
+        button[kind="header"] {{
+            background: rgba(15, 15, 25, 0.78) !important;
+            border: 1px solid var(--border-violet) !important;
+            border-radius: 2px !important;
+            color: var(--accent-violet) !important;
+        }}
+        [data-testid="collapsedControl"] svg,
+        [data-testid="stSidebarCollapseButton"] svg,
+        button[kind="header"] svg {{
+            fill: var(--accent-violet) !important;
+            color: var(--accent-violet) !important;
+        }}
+        [data-testid="collapsedControl"] button:hover,
+        [data-testid="stSidebarCollapseButton"] button:hover,
+        button[kind="header"]:hover {{
+            background: var(--accent-violet-soft) !important;
+            box-shadow: 0 0 18px var(--accent-violet-glow) !important;
+        }}
+
+        /* Reinforce frosted-glass on content panels so they stay readable
+           over the now-visible raven background */
+        [data-testid="stForm"],
+        details[data-testid="stExpander"],
+        [data-testid="stAlert"] {{
+            background: rgba(12, 12, 22, 0.72) !important;
+            backdrop-filter: blur(10px) !important;
+        }}
 
         /* Make main container content sit above the scanlines */
         .main, [data-testid="stMain"], section.main {{ position: relative; z-index: 1; }}
@@ -739,23 +782,44 @@ if st.sidebar.button("🔍 Check Search Engines", use_container_width=True):
 
 # --- Past Investigations ---
 st.sidebar.divider()
-st.sidebar.subheader("📂 Past Investigations")
 saved_investigations = load_investigations()
+_inv_count = len(saved_investigations)
+st.sidebar.subheader(
+    f"🗂️ Archive · {_inv_count} run{'s' if _inv_count != 1 else ''}"
+)
 if saved_investigations:
     inv_labels = [
         f"{inv['_filename'].replace('investigation_','').replace('.json','')} — {inv['query'][:40]}"
         for inv in saved_investigations
     ]
     selected_inv_label = st.sidebar.selectbox(
-        "Load investigation", ["(none)"] + inv_labels, key="inv_select"
+        "Load investigation",
+        ["(none)"] + inv_labels,
+        key="inv_select",
+        label_visibility="collapsed",
     )
     if selected_inv_label != "(none)":
         selected_inv_idx = inv_labels.index(selected_inv_label)
-        if st.sidebar.button("📂 Load", use_container_width=True, key="load_inv_btn"):
+        _col_load, _col_del = st.sidebar.columns(2)
+        if _col_load.button("📂 Load", use_container_width=True, key="load_inv_btn"):
             st.session_state["loaded_investigation"] = saved_investigations[selected_inv_idx]
             st.rerun()
+        if _col_del.button("🗑️ Delete", use_container_width=True, key="del_inv_btn"):
+            try:
+                (INVESTIGATIONS_DIR / saved_investigations[selected_inv_idx]["_filename"]).unlink()
+                st.toast("Investigation deleted.", icon="🗑️")
+                st.rerun()
+            except Exception as _e:
+                st.sidebar.error(f"Delete failed: {_e}")
+    st.sidebar.caption(
+        f"Stored in `{INVESTIGATIONS_DIR}/` as JSON. "
+        "Survives restarts; mount the folder in Docker to persist across containers."
+    )
 else:
-    st.sidebar.caption("No saved investigations yet.")
+    st.sidebar.caption(
+        "No archived runs yet. Each probe is saved as JSON in "
+        f"`{INVESTIGATIONS_DIR}/` and reloadable from this panel."
+    )
 
 
 # --- Raven brand mark ---
@@ -917,15 +981,19 @@ if run_button and query:
                 preset=selected_preset, custom_instructions=custom_instructions,
             )
 
-    # Save investigation
-    _fname = save_investigation(
-        query=query,
-        refined_query=st.session_state.refined,
-        model=model,
-        preset_label=selected_preset_label,
-        sources=st.session_state.filtered,
-        summary=st.session_state.streamed_summary,
-    )
+    # Save investigation (persist to investigations/ as JSON)
+    try:
+        _fname = save_investigation(
+            query=query,
+            refined_query=st.session_state.refined,
+            model=model,
+            preset_label=selected_preset_label,
+            sources=st.session_state.filtered,
+            summary=st.session_state.streamed_summary,
+        )
+        st.toast(f"💾 Saved as `{_fname}`", icon="🪶")
+    except Exception as _save_err:
+        st.toast(f"⚠️ Could not save investigation: {_save_err}", icon="⚠️")
 
     # Render organized sections
     with notes_placeholder.container():

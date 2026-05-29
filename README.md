@@ -1,5 +1,7 @@
 <div align="center">
-   <h1>🪶 Raven</h1>
+   <img src=".github/assets/raven.png" alt="Raven" width="320" />
+   <h1>R A V E N</h1>
+   <p><em>an oracle for the unindexed deep — sees what others cannot</em></p>
    <p><strong>AI-powered dark web OSINT — a hardened fork of <a href="https://github.com/apurvsinghgautam/robin">Robin</a>.</strong></p>
    <p>
      <a href="#quick-start">Quick start</a> •
@@ -10,12 +12,16 @@
    </p>
 </div>
 
-> Raven keeps Robin's pipeline (search → filter → scrape → summarize via an LLM) and adds:
+> Raven keeps Robin's pipeline (search → filter → scrape → summarize via an LLM) and adds three things:
 > 1. **Stability fixes** for the LLM integration layer (bugs that broke custom providers, shared streaming state, stale model defaults).
 > 2. **Opt-in egress security** — manual proxy + WireGuard / OpenVPN tunnel on top of Tor.
 > 3. **Frictionless Windows startup** — a native PowerShell launcher. No WSL2, no `apt install tor`.
 
-![Demo](.github/assets/screen-ui.png)
+<div align="center">
+   <img src=".github/assets/screen-ui.png" alt="Raven UI" width="850" />
+   <br/>
+   <sub><em>Threat-researcher terminal — Tor / VPN / Proxy HUD, console-style query form, archived runs sidebar.</em></sub>
+</div>
 
 ---
 
