@@ -108,8 +108,19 @@ if (-not $NoTorBundle) {
             Write-Warn "Pin a hash from torproject.org and update `$TorBundleSha256."
         }
 
-        # Extract via built-in tar (Windows 10+).
-        & tar.exe -xzf $tarball -C $TorDir
+        # Extract via Windows built-in tar (Windows 10 1803+). Call the full path
+        # explicitly so a GNU tar from Git Bash / MSYS on PATH does not get picked
+        # instead — GNU tar misreads 'C:\path' as a remote host (colon = host sep).
+        $winTar = Join-Path $env:WINDIR "System32\tar.exe"
+        if (-not (Test-Path $winTar)) {
+            Write-Err "Windows tar.exe not found at $winTar. Extract $tarball manually into $TorDir."
+            exit 1
+        }
+        & $winTar -xzf $tarball -C $TorDir
+        if ($LASTEXITCODE -ne 0) {
+            Write-Err "tar.exe failed to extract Tor bundle (exit $LASTEXITCODE)."
+            exit 1
+        }
         Remove-Item $tarball
     }
 }
