@@ -182,3 +182,11 @@ tools/
 *.conf
 *.ovpn
 !.github/**/*.conf
+
+# Runtime artifacts
+investigations/
+
+# Bogus npm install python aftermath
+node_modules/
+package.json
+package-lock.json
